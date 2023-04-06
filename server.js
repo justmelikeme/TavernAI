@@ -23,7 +23,8 @@ const crypto = require('crypto');
 const ipaddr = require('ipaddr.js');
 const json5 = require('json5');
 var sanitize_filename = require("sanitize-filename");
-
+const utf8Encode = new TextEncoder();
+const utf8Decode = new TextDecoder('utf-8', { ignoreBOM: true });
 
 const config = require(path.join(process.cwd(), './config.conf'));
 const server_port = config.port;
@@ -677,10 +678,11 @@ async function charaWrite(source_img, data, target_img, format = 'webp', respons
                     //let webp_parameters = {'quality':80, lossless: true, near_lossless:false, smartSubsample: true, effort: 6};
                     try {
                       const imageBuffer = fs.readFileSync(source_img);
+                      let stringByteArray = utf8Encode.encode(data).toString();
                       const processedImage = await sharp(imageBuffer).resize(400, 600).webp({'quality':95}).withMetadata({
                                         exif: {
                                             IFD0: {
-                                                UserComment: data
+                                                UserComment: stringByteArray
                                             }
                                         }
                                     }).toBuffer();
@@ -746,12 +748,31 @@ async function charaRead(img_url, input_format){
     
     switch(format){
         case 'webp':
+        try {
+            sharp.cache(false);
+            let char_data;
             const exif_data = await ExifReader.load(fs.readFileSync(img_url));
-            const char_data = exif_data['UserComment']['description'];
-            if (char_data === 'Undefined' && exif_data['UserComment'].value && exif_data['UserComment'].value.length === 1) {
-                return exif_data['UserComment'].value[0];
+            if (exif_data['UserComment']['description']) {
+                let description = exif_data['UserComment']['description'];
+                try {
+                    JSON.parse(description);
+                    char_data = description;
+                } catch {
+                    const byteArr = description.split(",").map(Number);
+                    const uint8Array = new Uint8Array(byteArr);
+                    const char_data_string = utf8Decode.decode(uint8Array);
+                    char_data = char_data_string;
+                }
+            } else {
+                console.log('No description found in EXIF data.');
+                return false;
             }
+            console.log(char_data);
             return char_data;
+        } catch (err) {
+            console.log(err);
+            return false;
+        }
         case 'png':
             const buffer = fs.readFileSync(img_url);
             const chunks = extract(buffer);
